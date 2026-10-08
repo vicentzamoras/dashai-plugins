@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "built_at": "2026-10-08T16:23:28+00:00",
+  "built_at": "2026-10-08T16:27:32+00:00",
   "plugins": [
     {
       "id": "classification-kit",
@@ -80,6 +80,43 @@
       "project_urls": {
         "Homepage": "https://github.com/vicentzamoras/dashai-echo-chat",
         "Issues": "https://github.com/vicentzamoras/dashai-echo-chat/issues"
+      }
+    },
+    {
+      "id": "explainers-plus",
+      "source": "git",
+      "location": "https://github.com/centzlostres/explainers-plus",
+      "name": "Explainers Plus",
+      "description": "Global and local explanations for tabular classifiers.",
+      "authors": [
+        {
+          "name": "John Doe",
+          "email": "",
+          "url": "https://github.com/centzlostres"
+        }
+      ],
+      "components": [
+        "PermutationImportancePlus",
+        "KernelShapPlus"
+      ],
+      "component_types": [
+        "GlobalExplainer",
+        "LocalExplainer"
+      ],
+      "releases": [
+        {
+          "tag": "v1.0.0",
+          "version": "1.0.0",
+          "min_app_version": "0.10.0",
+          "trust_level": "github_attested",
+          "sha256": "f7926b568b494aee98c3876cc62122f862096daeae53046077c3c2b2c2f24d68",
+          "published_at": "2026-10-08T16:05:20Z",
+          "dependencies": []
+        }
+      ],
+      "project_urls": {
+        "Homepage": "https://github.com/centzlostres/explainers-plus",
+        "Issues": "https://github.com/centzlostres/explainers-plus/issues"
       }
     },
     {
