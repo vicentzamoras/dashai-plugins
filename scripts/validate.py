@@ -8,9 +8,11 @@ Checked here: the entry, the repo (public, not archived, license), its
 releases (one .zip/.tar.gz or the tag's source code, at most 200 MB, the
 attestation with `gh attestation verify`) and the manifest (fields, id, the
 version equals the tag, component types, each class exists, read with ast).
-Not checked: what needs dashAI (name clashes with its components, pip
-resolving the dependencies with its own, loading the code). dashAI checks all
-of it again when installing: this only decides what the store lists.
+A PR's component names must not be another store plugin's nor dashAI's own
+(its `get_initial_components`, read with ast from GitHub). Not checked: what
+needs dashAI running (pip resolving the dependencies with its own, loading the
+code). dashAI checks all of it again when installing: this only decides what
+the store lists.
 
 The build reuses a release already in index.json while its file (or, for
 source code, its commit) is the same: a daily build only reviews what is new.
@@ -55,6 +57,11 @@ LICENSES = {
     "LGPL-3.0", "Unlicense",
 }
 ROOT = Path(".")
+# dashAI's own components, released (production) and upcoming (develop).
+DASHAI_COMPONENTS = (
+    "https://raw.githubusercontent.com/DashAISoftware/DashAI/{}/DashAI/back/initial_components.py"
+)
+DASHAI_BRANCHES = ("production", "develop")
 
 
 class Invalid(Exception):
@@ -388,6 +395,26 @@ def describe(entry, log, known=None):
     }
 
 
+def dashai_components():
+    """The class names dashAI registers itself: the ones its
+    ``get_initial_components`` lists. A plugin can't take them."""
+    names = set()
+    for branch in DASHAI_BRANCHES:
+        tree = ast.parse(get(DASHAI_COMPONENTS.format(branch)))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == "get_initial_components":
+                names |= {
+                    item.id
+                    for found in ast.walk(node)
+                    if isinstance(found, ast.List)
+                    for item in found.elts
+                    if isinstance(item, ast.Name)
+                }
+    if not names:
+        raise Invalid("could not read dashAI's own components")
+    return names
+
+
 def removed_ids():
     return {item["id"] for item in json.loads((ROOT / "removed.json").read_text("utf-8"))}
 
@@ -401,6 +428,7 @@ def check(paths):
     author = os.environ["PR_AUTHOR"].lower()
     report, failed = [], False
     others = json.loads((ROOT / "index.json").read_text("utf-8"))["plugins"]
+    dashai = dashai_components()
     for path in paths:
         lines = []
         try:
@@ -421,6 +449,9 @@ def check(paths):
             clash = [c for c in listed["components"] if c in taken]
             if clash:
                 raise Invalid(f"components already in the store: {', '.join(f'{c} ({taken[c]})' for c in clash)}")
+            own = sorted(set(listed["components"]) & dashai)
+            if own:
+                raise Invalid(f"components dashAI already has: {', '.join(own)}; prefix your class names")
             latest = listed["releases"][0]
             report.append(f"✅ **{entry['id']}** {latest['tag']} ({latest['trust_level']}): {', '.join(listed['components'])}")
         except Invalid as error:

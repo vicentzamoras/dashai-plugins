@@ -10,8 +10,10 @@ cada día y a mano (*Actions → Build index → Run workflow*). Cada día revis
 workflow **Check**. Los dos revisan lo que se puede sin dashAI: la entrada, el repo (público,
 no archivado, licencia), las releases (archivo, tamaño, atestación, `README.md` en la raíz del
 commit) y el manifiesto (campos,
-`id`, versión igual al tag, tipos, que cada clase exista). Lo que necesita dashAI (choques con
-sus componentes, dependencias, cargar el código) lo vuelve a revisar dashAI al instalar.
+`id`, versión igual al tag, tipos, que cada clase exista). **Check** revisa además que los
+nombres de los componentes no sean los de otro plugin de la tienda ni los de dashAI (lee su
+`get_initial_components` de las ramas `production` y `develop`). Lo que necesita dashAI
+corriendo (dependencias, cargar el código) lo vuelve a revisar dashAI al instalar.
 
 - `plugins/<id>.json`: una entrada por plugin (`id` y `repo`).
 - `removed.json`: plugins retirados, con el motivo.

@@ -10,7 +10,10 @@
    GPLv3, LGPLv3, Unlicense) y un `README.md` en la raíz, con ese nombre exacto, en el commit
    de cada release: dashAI lo muestra en la tienda desde ahí.
 4. El `id` no contiene `dashai`.
-5. Lo probaste instalándolo en dashAI desde la URL de tu repositorio.
+5. Los nombres de clase de tus componentes no son los de un componente de dashAI ni los de otro
+   plugin de la tienda: dashAI identifica cada componente por el nombre de su clase, y dos no
+   pueden llamarse igual. Usa un prefijo propio (por ejemplo `KitAccuracy`, no `Accuracy`).
+6. Lo probaste instalándolo en dashAI desde la URL de tu repositorio.
 
 ## El PR
 
