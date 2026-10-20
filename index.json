@@ -67,8 +67,8 @@
         "GenerativeModel"
       ],
       "project_urls": {
-        "Homepage": "https://github.com/vicentzamoras/dashai-echo-chat",
-        "Issues": "https://github.com/vicentzamoras/dashai-echo-chat/issues"
+        "Homepage": "https://github.com/vicentzamoras/echo-chat",
+        "Issues": "https://github.com/vicentzamoras/echo-chat/issues"
       },
       "license": "MIT",
       "releases": [
