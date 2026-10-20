@@ -357,10 +357,27 @@ def review(repo, release, plugin_id):
     return {k: v for k, v in listed.items() if v is not None}, plugin_fields(manifest)
 
 
-def describe(entry, log, known=None):
+def taken_names(plugins, plugin_id, dashai):
+    """Component name -> who has it: dashAI, or another plugin of the store."""
+    taken = {name: p["id"] for p in plugins if p["id"] != plugin_id for name in p["components"]}
+    return {**taken, **{name: "dashAI" for name in dashai}}
+
+
+def check_names(components, taken):
+    clash = [name for name in components if name in taken]
+    if clash:
+        raise Invalid(
+            f"component names already used: {', '.join(f'{n} ({taken[n]})' for n in clash)}; "
+            "rename these classes with a prefix of your own and publish a new release"
+        )
+
+
+def describe(entry, log, known=None, taken=None, listed_before=()):
     """The entry as index.json lists it; None if no release passes. ``known``:
     its entry in the last index, whose unchanged releases are reused. ``log``
-    gets one line per release."""
+    gets one line per release. ``taken``: component names a new release can't
+    use (``taken_names``); the tags in ``listed_before`` are not checked
+    against them, so dashAI adding a name later doesn't drop what is listed."""
     repo = entry["repo"]
     license_id = check_repo(repo)
     location = f"https://github.com/{repo}"
@@ -376,6 +393,8 @@ def describe(entry, log, known=None):
             continue
         try:
             listed, fields = review(repo, release, entry["id"])
+            if tag not in listed_before:
+                check_names(fields["components"], taken or {})
         except Invalid as error:
             log(f"  {tag}: {error}")
             continue
@@ -442,16 +461,10 @@ def check(paths):
             repos = [json.loads(p.read_text("utf-8"))["repo"].lower() for p in entries() if p.name != Path(path).name]
             if entry["repo"].lower() in repos:
                 raise Invalid(f"{entry['repo']} is already in the store")
-            listed = describe(entry, lines.append)
+            taken = taken_names(others, entry["id"], dashai)
+            listed = describe(entry, lines.append, taken=taken)
             if listed is None:
                 raise Invalid("no release passes")
-            taken = {c: p["id"] for p in others if p["id"] != entry["id"] for c in p["components"]}
-            clash = [c for c in listed["components"] if c in taken]
-            if clash:
-                raise Invalid(f"components already in the store: {', '.join(f'{c} ({taken[c]})' for c in clash)}")
-            own = sorted(set(listed["components"]) & dashai)
-            if own:
-                raise Invalid(f"components dashAI already has: {', '.join(own)}; prefix your class names")
             latest = listed["releases"][0]
             report.append(f"✅ **{entry['id']}** {latest['tag']} ({latest['trust_level']}): {', '.join(listed['components'])}")
         except Invalid as error:
@@ -474,12 +487,20 @@ def build(full=False):
     old = json.loads(path.read_text("utf-8")) if path.is_file() else {"plugins": []}
     kept = {p["id"]: p for p in old["plugins"]}
     removed = json.loads((ROOT / "removed.json").read_text("utf-8"))
+    dashai = dashai_components()
     plugins = []
     for entry_path in entries():
         print(entry_path.name)
         try:
             entry = load_entry(entry_path, {item["id"] for item in removed})
-            listed = describe(entry, print, None if full else kept.get(entry["id"]))
+            before = kept.get(entry["id"], {})
+            listed = describe(
+                entry,
+                print,
+                None if full else before or None,
+                taken_names(old["plugins"], entry["id"], dashai),
+                {release["tag"] for release in before.get("releases", [])},
+            )
         except Invalid as error:
             print(f"  left out: {error}")
             continue
