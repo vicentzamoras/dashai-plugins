@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "built_at": "2026-10-20T15:26:42+00:00",
+  "built_at": "2026-10-20T15:35:31+00:00",
   "plugins": [
     {
       "id": "classification-kit",
@@ -41,6 +41,47 @@
           "trust_level": "github_source",
           "commit": "4949553973376e659a69479ea2cb64355d79e7a4",
           "published_at": "2026-10-08T15:20:17Z",
+          "dependencies": []
+        }
+      ]
+    },
+    {
+      "id": "explainers-plus",
+      "source": "git",
+      "location": "https://github.com/centzlostres/explainers-plus",
+      "name": "Explainers Plus",
+      "description": "Global and local explanations for tabular classifiers.",
+      "authors": [
+        {
+          "name": "John Doe",
+          "email": "",
+          "url": "https://github.com/centzlostres"
+        }
+      ],
+      "components": [
+        "PermutationImportancePlus",
+        "KernelShapPlus"
+      ],
+      "component_types": [
+        "GlobalExplainer",
+        "LocalExplainer"
+      ],
+      "project_urls": {
+        "Homepage": "https://github.com/centzlostres/explainers-plus",
+        "Issues": "https://github.com/centzlostres/explainers-plus/issues"
+      },
+      "license": "MIT",
+      "releases": [
+        {
+          "tag": "v1.0.0",
+          "version": "1.0.0",
+          "min_app_version": "0.10.0",
+          "sha256": "f7926b568b494aee98c3876cc62122f862096daeae53046077c3c2b2c2f24d68",
+          "trust_level": "github_attested",
+          "workflow": ".github/workflows/release.yaml",
+          "signed_at": "2026-10-08T16:05:32+00:00",
+          "commit": "70caee3f345f88ba77b48cd435032a758ddedcfc",
+          "published_at": "2026-10-08T16:05:20Z",
           "dependencies": []
         }
       ]
