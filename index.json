@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "built_at": "2026-10-20T15:39:49+00:00",
+  "built_at": "2026-10-20T15:40:28+00:00",
   "plugins": [
     {
       "id": "classification-kit",
@@ -42,6 +42,47 @@
           "commit": "4949553973376e659a69479ea2cb64355d79e7a4",
           "published_at": "2026-10-08T15:20:17Z",
           "dependencies": []
+        }
+      ]
+    },
+    {
+      "id": "echo-chat",
+      "source": "git",
+      "location": "https://github.com/vicentzamoras/echo-chat",
+      "name": "Echo Chat",
+      "description": "A chat model that echoes your message, or tells a joke with /joke.",
+      "authors": [
+        {
+          "name": "Vicente Zamora",
+          "email": "",
+          "url": "https://github.com/vicentzamoras"
+        }
+      ],
+      "components": [
+        "EchoChatTask",
+        "EchoModel"
+      ],
+      "component_types": [
+        "GenerativeTask",
+        "GenerativeModel"
+      ],
+      "project_urls": {
+        "Homepage": "https://github.com/vicentzamoras/dashai-echo-chat",
+        "Issues": "https://github.com/vicentzamoras/dashai-echo-chat/issues"
+      },
+      "license": "MIT",
+      "releases": [
+        {
+          "tag": "v1.0.0",
+          "version": "1.0.0",
+          "min_app_version": "0.10.0",
+          "sha256": "cbe257c6d3c0eee95bd2c552d0f085306e25898f655728e247f1f2d5d2b7f32a",
+          "trust_level": "github_asset",
+          "commit": "796272d90f3eeacd37b001b3242e30141e6e28c1",
+          "published_at": "2026-10-08T15:18:21Z",
+          "dependencies": [
+            "pyjokes>=0.6"
+          ]
         }
       ]
     },
