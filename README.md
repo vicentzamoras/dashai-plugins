@@ -4,9 +4,11 @@
 apunta al repositorio de GitHub de un plugin. `index.json` es lo que dashAI descarga.
 
 `index.json` lo genera el workflow **Build index** (`scripts/validate.py`) al hacer merge,
-cada día y a mano (*Actions → Build index → Run workflow*). Cada día revisa solo lo nuevo
-(reusa una release cuyo archivo o commit no cambió) y los lunes revisa todo de nuevo;
-`built_at` es la hora de la última revisión. Cada PR pasa por el
+cada 6 horas y a mano (*Actions → Build index → Run workflow*; con *full* revisa todo de
+nuevo, para cuando cambian las reglas). Lee el estado y las releases de todos los repos con
+GraphQL, 100 repos por consulta, y revisa solo lo nuevo (reusa una release cuyo archivo o
+commit no cambió). Solo commitea si cambia lo que el índice lista; `built_at` es cuándo
+cambió por última vez. El archivo va compacto (sin sangría). Cada PR pasa por el
 workflow **Check**. Los dos revisan lo que se puede sin dashAI: la entrada, el repo (público,
 no archivado, licencia), las releases (archivo, tamaño, atestación, `README.md` en la raíz del
 commit) y el manifiesto (campos,
@@ -23,6 +25,6 @@ un issue de este repo que lo menciona.
 - `removed.json`: plugins retirados, con el motivo.
 - `index.json`: lo genera **Build index**; no se edita a mano.
 - `schema/`: el formato de cada archivo (JSON Schema).
-- `scripts/validate.py` y `.github/workflows/`: el bot.
+- `scripts/validate.py` y `.github/workflows/`: el bot (su test: `python -m unittest discover scripts`).
 
 Para publicar un plugin, ver [CONTRIBUTING.md](CONTRIBUTING.md).

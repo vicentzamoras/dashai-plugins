@@ -28,7 +28,7 @@
 
 El check **Check** revisa tu entrada y tus releases; si falla, su resumen dice por qué.
 Después una persona del equipo revisa el PR y hace merge, y **Build index** publica tu plugin
-en `index.json`. Las versiones nuevas no necesitan otro PR: se recogen cada día.
+en `index.json`. Las versiones nuevas no necesitan otro PR: el bot las recoge en ≤ 6 horas.
 
 ## Si una release nueva no aparece
 

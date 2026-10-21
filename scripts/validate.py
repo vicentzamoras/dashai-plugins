@@ -15,8 +15,13 @@ code). dashAI checks all of it again when installing: this only decides what
 the store lists.
 
 The build reuses a release already in index.json while its file (or, for
-source code, its commit) is the same: a daily build only reviews what is new.
-`--full` reviews everything again (weekly). When a new release (or the whole
+source code, its commit) is the same: it only reviews what is new. It reads
+every repo's state and releases with GraphQL, 100 repos per query (``triage``),
+so a plugin that didn't change costs no REST request; a release that was left
+out and is older than a listed one is not reviewed again. `--full` reviews
+everything again (when the rules change). index.json only changes (and
+``built_at`` with it) when what it lists changes, so dashAI's ETag holds
+between builds. When a new release (or the whole
 plugin) is left out, the build tells its author in an issue of this repo
 (``notify``); outside GitHub Actions it only prints what it would do.
 
@@ -91,6 +96,65 @@ def api(path):
     return json.loads(data) if data else None
 
 
+# What ``triage`` asks of each repo. 5 releases (a query of 100 repos costs 6
+# of the 1,000 points an hour GITHUB_TOKEN has: 10,000 plugins take 600).
+GRAPH_REPO = """nameWithOwner isPrivate isArchived licenseInfo { spdxId }
+releases(first: 5, orderBy: {field: CREATED_AT, direction: DESC}) { nodes {
+  tagName isDraft isPrerelease publishedAt tagCommit { oid }
+  releaseAssets(first: 20) { nodes { name size digest downloadUrl } } } }"""
+
+
+def triage(repos):
+    """lowercased repo -> (its state, its releases) as the REST API gives
+    them (``check_repo``, ``releases``), 100 repos per GraphQL query. Missing:
+    what GitHub didn't answer (not found, rate limit), checked with REST then.
+    Releases are None when a prerelease may hide a release REST would list."""
+    if not TOKEN:  # GraphQL needs one
+        return {}
+    found = {}
+    for start in range(0, len(repos), 100):
+        chunk = repos[start:start + 100]
+        query = " ".join(
+            f'r{i}: repository(owner: "{repo.split("/")[0]}", name: "{repo.split("/")[1]}") {{ {GRAPH_REPO} }}'
+            for i, repo in enumerate(chunk)
+        )
+        request = urllib.request.Request(
+            API + "graphql", data=json.dumps({"query": "{ " + query + " }"}).encode(),
+            headers={"Authorization": f"Bearer {TOKEN}", "User-Agent": "dashai-plugins"},
+        )
+        with urllib.request.urlopen(request) as r:
+            data = json.loads(r.read()).get("data") or {}
+        for i, repo in enumerate(chunk):
+            node = data.get(f"r{i}")
+            if not node:
+                continue
+            state = {
+                "full_name": node["nameWithOwner"],
+                "private": node["isPrivate"],
+                "archived": node["isArchived"],
+                "license": {"spdx_id": (node["licenseInfo"] or {}).get("spdxId")},
+            }
+            nodes = node["releases"]["nodes"]
+            listed = [
+                {
+                    "tag_name": n["tagName"],
+                    "draft": n["isDraft"],
+                    "prerelease": n["isPrerelease"],
+                    "published_at": n["publishedAt"],
+                    "tag_commit": (n["tagCommit"] or {}).get("oid"),
+                    "assets": [
+                        {"name": a["name"], "size": a["size"], "digest": a["digest"],
+                         "browser_download_url": a["downloadUrl"]}
+                        for a in n["releaseAssets"]["nodes"]
+                    ],
+                }
+                for n in nodes
+            ]
+            hidden = len(nodes) == 5 and any(r["draft"] or r["prerelease"] for r in listed)
+            found[repo.lower()] = (state, None if hidden else listed)
+    return found
+
+
 def load_entry(path, removed):
     """The entry's own rules (shape, name, id); returns it."""
     path = Path(path)
@@ -114,10 +178,11 @@ def load_entry(path, removed):
     return entry
 
 
-def check_repo(repo):
-    """Refuses a repo the store can't list; returns its license (SPDX id)."""
+def check_repo(repo, data=None):
+    """Refuses a repo the store can't list; returns its license (SPDX id).
+    ``data``: its state, if ``triage`` already read it."""
     try:
-        data = api(f"repos/{repo}")
+        data = data or api(f"repos/{repo}")
     except Invalid as error:
         raise Invalid(f"{repo} does not exist or is private") from error
     if data["full_name"].lower() != repo.lower():  # renamed or moved
@@ -132,8 +197,9 @@ def check_repo(repo):
     return spdx
 
 
-def releases(repo):
-    found = api(f"repos/{repo}/releases?per_page=20")
+def releases(repo, found=None):
+    """The newest published releases. ``found``: as ``triage`` read them."""
+    found = api(f"repos/{repo}/releases?per_page=20") if found is None else found
     found = [r for r in found if not r["draft"] and not r["prerelease"]]
     if not found:
         raise Invalid(f"{repo} has no published release")
@@ -171,7 +237,11 @@ def release_file(release):
     return assets[0] if len(assets) == 1 else None
 
 
-def tag_commit(repo, tag):
+def tag_commit(repo, release):
+    """The commit of the release's tag (``triage`` already read it)."""
+    if release.get("tag_commit"):
+        return release["tag_commit"]
+    tag = release["tag_name"]
     return api(f"repos/{repo}/commits/{urllib.parse.quote(tag, safe='')}")["sha"]
 
 
@@ -225,10 +295,10 @@ def fetch(repo, release, into):
         if attested:
             listed.update(trust_level="github_attested", workflow=attested["workflow"],
                           signed_at=attested["signed_at"])
-        listed["commit"] = (attested or {}).get("commit") or tag_commit(repo, tag)
+        listed["commit"] = (attested or {}).get("commit") or tag_commit(repo, release)
         return extract(blob, asset["name"].lower(), into / "plugin"), listed
     # No single file: the source code at the tag's commit (a tag can move).
-    commit = tag_commit(repo, tag)
+    commit = tag_commit(repo, release)
     blob = get(f"https://codeload.github.com/{repo}/tar.gz/{commit}")
     sha256 = hashlib.sha256(gzip.decompress(blob)).hexdigest()  # the tar's, as dashAI
     listed = {"sha256": sha256, "trust_level": "github_source", "commit": commit}
@@ -255,7 +325,7 @@ def unchanged(repo, release, old):
     asset = release_file(release)
     if asset:
         return old["trust_level"] != "github_source" and asset.get("digest") == f"sha256:{old['sha256']}"
-    return old["trust_level"] == "github_source" and tag_commit(repo, release["tag_name"]) == old["commit"]
+    return old["trust_level"] == "github_source" and tag_commit(repo, release) == old["commit"]
 
 
 def defines(folder, class_ref):
@@ -374,25 +444,31 @@ def check_names(components, taken):
         )
 
 
-def describe(entry, log, known=None, taken=None, listed_before=(), left_out=None):
+def describe(entry, log, known=None, taken=None, listed_before=(), left_out=None, state=None):
     """The entry as index.json lists it; None if no release passes. ``known``:
-    its entry in the last index, whose unchanged releases are reused. ``log``
-    gets one line per release. ``taken``: component names a new release can't
-    use (``taken_names``); the tags in ``listed_before`` are not checked
-    against them, so dashAI adding a name later doesn't drop what is listed.
-    ``left_out`` gets why each release newer than the newest that passes fails."""
+    its entry in the last index, whose unchanged releases are reused, and a
+    release it left out that is older than one that passes is not reviewed
+    again. ``log`` gets one line per release. ``taken``: component names a new
+    release can't use (``taken_names``); the tags in ``listed_before`` are not
+    checked against them, so dashAI adding a name later doesn't drop what is
+    listed. ``left_out`` gets why each release newer than the newest that
+    passes fails. ``state``: the repo and its releases as ``triage`` read them."""
     repo = entry["repo"]
-    license_id = check_repo(repo)
+    repo_data, found = state or (None, None)
+    license_id = check_repo(repo, repo_data)
     location = f"https://github.com/{repo}"
     if known and known.get("location") != location:
         known = None  # another repo now: nothing to reuse
     old = {r["tag"]: r for r in (known or {}).get("releases", [])}
     passed = []  # (listed release, the plugin's fields from it; None if reused)
-    for release in releases(repo):
+    for release in releases(repo, found):
         tag = release["tag_name"]
         if unchanged(repo, release, old.get(tag)):
             log(f"  {tag}: ok, unchanged ({old[tag]['trust_level']})")
             passed.append((old[tag], None))
+            continue
+        if known and tag not in old and passed:
+            log(f"  {tag}: left out before, not reviewed again")
             continue
         try:
             listed, fields = review(repo, release, entry["id"])
@@ -447,6 +523,19 @@ def entries():
     return sorted((ROOT / "plugins").glob("*.json"))
 
 
+def entry_repos():
+    """Every entry's repo, for ``triage`` (a broken entry is ``load_entry``'s)."""
+    repos = []
+    for path in entries():
+        try:
+            repo = json.loads(path.read_text("utf-8"))["repo"]
+        except (ValueError, KeyError, TypeError):
+            continue
+        if isinstance(repo, str) and REPO.match(repo):
+            repos.append(repo)
+    return repos
+
+
 def check(paths):
     """A PR: only entries change, each passes, owned by the PR's author."""
     author = os.environ["PR_AUTHOR"].lower()
@@ -486,13 +575,19 @@ def check(paths):
 
 def build(full=False):
     """index.json from every entry. A plugin that can't be read now (GitHub
-    down, rate limit) keeps what the index had. ``built_at`` is when it was
-    last reviewed, so the file changes (and is committed) every day."""
+    down, rate limit) keeps what the index had. ``built_at`` is when what it
+    lists last changed: a build that changes nothing leaves the file as it was
+    (no commit, and dashAI's ETag holds)."""
     path = ROOT / "index.json"
     old = json.loads(path.read_text("utf-8")) if path.is_file() else {"plugins": []}
     kept = {p["id"]: p for p in old["plugins"]}
     removed = json.loads((ROOT / "removed.json").read_text("utf-8"))
     dashai = dashai_components()
+    try:
+        state = triage(entry_repos())
+    except (urllib.error.URLError, OSError, ValueError) as error:
+        print(f"triage failed, each plugin is read with REST: {error}")
+        state = {}
     plugins = []
     problems, fine = {}, {}  # id -> (repo, why, tag still offered); id -> tag
     for entry_path in entries():
@@ -508,6 +603,7 @@ def build(full=False):
                 taken_names(old["plugins"], entry["id"], dashai),
                 {release["tag"] for release in before.get("releases", [])},
                 left_out,
+                state.get(entry["repo"].lower()),
             )
         except Invalid as error:
             print(f"  left out: {error}")
@@ -529,13 +625,11 @@ def build(full=False):
             problems[entry["id"]] = (entry["repo"], left_out, offered)
         else:
             fine[entry["id"]] = offered
-    index = {
-        "schema": 1,
-        "built_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "plugins": plugins,
-        "removed": removed,
-    }
-    path.write_text(json.dumps(index, indent=2, ensure_ascii=False) + "\n", "utf-8", newline="\n")
+    index = {"schema": 1, "built_at": old.get("built_at"), "plugins": plugins, "removed": removed}
+    if index != old:
+        index["built_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    # Compact: a quarter smaller than indented, and dashAI reads it whole.
+    path.write_text(json.dumps(index, ensure_ascii=False, separators=(",", ":")) + "\n", "utf-8", newline="\n")
     print(f"index.json: {len(plugins)} plugins")
     try:  # index.json is written: a failed notice must not keep it from the commit
         notify(problems, fine)

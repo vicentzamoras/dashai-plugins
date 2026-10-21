@@ -1,7 +1,7 @@
-# Builds index.json (scripts/validate.py) after a merge, every day (new
-# releases need no PR; only what changed is reviewed) and on demand; on
-# Mondays it reviews every release again. built_at changes every build, so
-# every build commits: index.json says when it was last reviewed.
+# Builds index.json (scripts/validate.py) after a merge, every 6 hours (new
+# releases need no PR; only what changed is reviewed) and on demand ("full":
+# every release again, when the bot's rules change). It commits only when what
+# the index lists changes.
 name: Build index
 
 on:
@@ -9,9 +9,13 @@ on:
     branches: [main]
     paths: ["plugins/**", "removed.json", "scripts/**"]
   schedule:
-    - cron: "17 6 * * *"
-    - cron: "47 6 * * 1" # weekly: review everything again
+    - cron: "17 */6 * * *"
   workflow_dispatch:
+    inputs:
+      full:
+        description: Review every release again
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -29,10 +33,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
-        run: |
-          full=""
-          if [ "${{ github.event.schedule }}" = "47 6 * * 1" ]; then full=--full; fi
-          python3 scripts/validate.py build $full
+          FULL: ${{ inputs.full && '--full' || '' }}
+        run: python3 scripts/validate.py build $FULL
       - name: Commit
         run: |
           git add index.json
