@@ -554,7 +554,7 @@ def notify(problems, fine):
     (``fine``). A plugin kept as it was (GitHub down) is in neither."""
     act = bool(os.environ.get("GITHUB_ACTIONS"))
     index = os.environ.get("GITHUB_REPOSITORY") or gh("repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner").strip()
-    listed = gh("issue", "list", "--author", "app/github-actions", "--state", "open", "--limit", "200", "--json", "number,title,body")
+    listed = gh("issue", "list", "--author", "github-actions[bot]", "--state", "open", "--limit", "200", "--json", "number,title,body")
     issues = {re.match(r"\[([a-z0-9-]+)\]", i["title"])[1]: i for i in json.loads(listed) if i["title"].startswith("[")}
 
     def run(*args):
