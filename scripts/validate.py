@@ -331,7 +331,8 @@ def unchanged(repo, release, old):
 def defines(folder, class_ref):
     """Whether ``module:Class`` names a class defined in the plugin's files."""
     module, name = class_ref.split(":")
-    base = folder.joinpath(*module.split("."))
+    root = folder / "src" if (folder / "src").is_dir() else folder  # as dashAI imports
+    base = root.joinpath(*module.split("."))
     for path in (base.with_suffix(".py"), base / "__init__.py"):
         if path.is_file():
             try:
