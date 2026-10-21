@@ -34,8 +34,9 @@ en `index.json`. Las versiones nuevas no necesitan otro PR: se recogen cada día
 
 **Build index** revisa cada release nueva con las mismas reglas del PR, también los nombres de
 los componentes. Una release que no pasa queda fuera del índice; las anteriores siguen
-publicadas y dashAI sigue ofreciendo la última que pasó. El motivo está en el log del workflow
-**Build index** (*Actions*), una línea por release, por ejemplo:
+publicadas y dashAI sigue ofreciendo la última que pasó. El bot abre un issue en este repo que
+te menciona (uno por plugin; comenta solo si el motivo cambia y se cierra solo cuando una release
+nueva pasa). El motivo va una línea por release, por ejemplo:
 
 ```text
 v1.2.0: component names already used: Accuracy (dashAI); rename these classes with a prefix of your own and publish a new release

@@ -16,6 +16,9 @@ de dashAI (lee su `get_initial_components` de las ramas `production` y `develop`
 ya publicada no se vuelve a revisar contra nombres que dashAI agregue después. Lo que necesita dashAI
 corriendo (dependencias, cargar el código) lo vuelve a revisar dashAI al instalar.
 
+Si una release nueva (o el plugin entero) queda fuera, **Build index** se lo avisa a su autor en
+un issue de este repo que lo menciona.
+
 - `plugins/<id>.json`: una entrada por plugin (`id` y `repo`).
 - `removed.json`: plugins retirados, con el motivo.
 - `index.json`: lo genera **Build index**; no se edita a mano.

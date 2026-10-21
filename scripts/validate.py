@@ -16,7 +16,9 @@ the store lists.
 
 The build reuses a release already in index.json while its file (or, for
 source code, its commit) is the same: a daily build only reviews what is new.
-`--full` reviews everything again (weekly).
+`--full` reviews everything again (weekly). When a new release (or the whole
+plugin) is left out, the build tells its author in an issue of this repo
+(``notify``); outside GitHub Actions it only prints what it would do.
 
 Standard library and the `gh` CLI only; GITHUB_TOKEN raises GitHub's limit.
 """
@@ -372,12 +374,13 @@ def check_names(components, taken):
         )
 
 
-def describe(entry, log, known=None, taken=None, listed_before=()):
+def describe(entry, log, known=None, taken=None, listed_before=(), left_out=None):
     """The entry as index.json lists it; None if no release passes. ``known``:
     its entry in the last index, whose unchanged releases are reused. ``log``
     gets one line per release. ``taken``: component names a new release can't
     use (``taken_names``); the tags in ``listed_before`` are not checked
-    against them, so dashAI adding a name later doesn't drop what is listed."""
+    against them, so dashAI adding a name later doesn't drop what is listed.
+    ``left_out`` gets why each release newer than the newest that passes fails."""
     repo = entry["repo"]
     license_id = check_repo(repo)
     location = f"https://github.com/{repo}"
@@ -397,6 +400,8 @@ def describe(entry, log, known=None, taken=None, listed_before=()):
                 check_names(fields["components"], taken or {})
         except Invalid as error:
             log(f"  {tag}: {error}")
+            if left_out is not None and not passed:
+                left_out.append(f"{tag}: {error}")
             continue
         log(f"  {tag}: ok ({listed['trust_level']})")
         passed.append((listed, fields))
@@ -489,8 +494,10 @@ def build(full=False):
     removed = json.loads((ROOT / "removed.json").read_text("utf-8"))
     dashai = dashai_components()
     plugins = []
+    problems, fine = {}, {}  # id -> (repo, why, tag still offered); id -> tag
     for entry_path in entries():
         print(entry_path.name)
+        entry, left_out = None, []
         try:
             entry = load_entry(entry_path, {item["id"] for item in removed})
             before = kept.get(entry["id"], {})
@@ -500,9 +507,12 @@ def build(full=False):
                 None if full else before or None,
                 taken_names(old["plugins"], entry["id"], dashai),
                 {release["tag"] for release in before.get("releases", [])},
+                left_out,
             )
         except Invalid as error:
             print(f"  left out: {error}")
+            if entry:
+                problems[entry["id"]] = (entry["repo"], [str(error)], None)
             continue
         except (urllib.error.URLError, OSError) as error:
             print(f"  kept as it was: {error}")
@@ -511,8 +521,14 @@ def build(full=False):
             continue
         if listed is None:
             print("  left out: no release passes")
+            problems[entry["id"]] = (entry["repo"], left_out, None)
             continue
         plugins.append(listed)
+        offered = listed["releases"][0]["tag"]
+        if left_out:
+            problems[entry["id"]] = (entry["repo"], left_out, offered)
+        else:
+            fine[entry["id"]] = offered
     index = {
         "schema": 1,
         "built_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -521,7 +537,56 @@ def build(full=False):
     }
     path.write_text(json.dumps(index, indent=2, ensure_ascii=False) + "\n", "utf-8", newline="\n")
     print(f"index.json: {len(plugins)} plugins")
+    try:  # index.json is written: a failed notice must not keep it from the commit
+        notify(problems, fine)
+    except (subprocess.CalledProcessError, urllib.error.URLError, Invalid) as error:
+        print(f"could not notify: {error}")
     return 0
+
+
+def gh(*args):
+    return subprocess.run(["gh", *args], check=True, capture_output=True, text=True, encoding="utf-8").stdout
+
+
+def notify(problems, fine):
+    """One open issue per plugin left out (``problems``), mentioning its author:
+    opened once, commented only when what fails changes, closed once it passes
+    (``fine``). A plugin kept as it was (GitHub down) is in neither."""
+    act = bool(os.environ.get("GITHUB_ACTIONS"))
+    index = os.environ.get("GITHUB_REPOSITORY") or gh("repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner").strip()
+    listed = gh("issue", "list", "--author", "app/github-actions", "--state", "open", "--limit", "200", "--json", "number,title,body")
+    issues = {re.match(r"\[([a-z0-9-]+)\]", i["title"])[1]: i for i in json.loads(listed) if i["title"].startswith("[")}
+
+    def run(*args):
+        print(("" if act else "would run: ") + " ".join(args[:3]))
+        if act:
+            gh(*args)
+
+    for plugin_id, (repo, why, offered) in problems.items():
+        owner = api(f"repos/{repo}")["owner"]
+        if owner["type"] != "User":  # an organization gets no mention: whoever added the entry
+            commits = api(f"repos/{index}/commits?path=plugins/{plugin_id}.json")
+            owner = commits[-1]["author"] or owner
+        still = f"La tienda sigue ofreciendo **{offered}**." if offered else "El plugin no está en la tienda hasta que una release pase."
+        body = "\n".join([
+            f"@{owner['login']}, la revisión de la tienda dejó fuera [{plugin_id}](https://github.com/{repo}):",
+            "",
+            *(f"- {line}" for line in why),
+            "",
+            f"{still} Qué hacer: [Si una release nueva no aparece](https://github.com/{index}/blob/main/CONTRIBUTING.md#si-una-release-nueva-no-aparece).",
+            "Este issue se cierra solo cuando una release nueva pase la revisión.",
+        ])
+        issue = issues.get(plugin_id)
+        if issue is None:
+            run("issue", "create", "--title", f"[{plugin_id}] No pasó la revisión de la tienda", "--body", body)
+        elif issue["body"].replace("\r\n", "\n").strip() != body.strip():
+            run("issue", "comment", str(issue["number"]), "--body", body)
+            run("issue", "edit", str(issue["number"]), "--body", body)
+        if not act:
+            print(body)
+    for plugin_id, offered in fine.items():
+        if plugin_id in issues:
+            run("issue", "close", str(issues[plugin_id]["number"]), "--comment", f"Ya pasa: la tienda ofrece {offered}.")
 
 
 if __name__ == "__main__":

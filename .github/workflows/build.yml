@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: write
+  issues: write # notify: tells an author why a release was left out
 
 concurrency:
   group: build-index
