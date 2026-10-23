@@ -56,7 +56,7 @@ CLASS_REF = re.compile(r"^[A-Za-z_]\w*(\.[A-Za-z_]\w*)*:[A-Za-z_]\w*$")
 VERSION = re.compile(r"^\d+(\.\d+)*((a|b|rc)\d+)?(\.post\d+)?(\.dev\d+)?$")
 TYPES = {
     "Model", "Converter", "Metric", "Task", "DataLoader", "Explorer",
-    "GlobalExplainer", "LocalExplainer", "Optimizer", "GenerativeModel",
+    "GlobalExplainer", "LocalExplainer", "GenerativeModel",
     "GenerativeTask",
 }  # dashAI's ALLOWED_COMPONENT_TYPES (plugins/validator.py)
 LICENSES = {
