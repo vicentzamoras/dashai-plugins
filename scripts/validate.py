@@ -7,7 +7,8 @@ the plugin's files alone, and builds index.json.
 Checked here: the entry, the repo (public, not archived, license), its
 releases (one .zip/.tar.gz or the tag's source code, at most 200 MB, the
 attestation with `gh attestation verify`) and the manifest (fields, id, the
-version equals the tag, component types, each class exists, read with ast).
+version equals the tag, component types, each class exists, read with ast;
+the plugins it needs have an entry here).
 A PR's component names must not be another store plugin's nor dashAI's own
 (its `get_initial_components`, read with ast from GitHub). Not checked: what
 needs dashAI running (pip resolving the dependencies with its own, loading the
@@ -389,6 +390,11 @@ def check_manifest(folder, plugin_id, tag):
     dependencies = manifest.get("dependencies", [])
     if not isinstance(dependencies, list) or not all(isinstance(d, str) for d in dependencies):
         raise Invalid("dependencies must be a list of pip requirements")
+    needs = manifest.get("plugin_dependencies", [])
+    if not isinstance(needs, list) or not all(isinstance(i, str) and ID.match(i) for i in needs):
+        raise Invalid("plugin_dependencies must be a list of plugin ids")
+    if len(set(needs)) != len(needs) or plugin_id in needs:
+        raise Invalid("plugin_dependencies can't repeat an id nor name the plugin itself")
     return manifest
 
 
@@ -426,6 +432,7 @@ def review(repo, release, plugin_id):
         **listed,
         "published_at": release["published_at"],
         "dependencies": manifest.get("dependencies", []),
+        "plugin_dependencies": manifest.get("plugin_dependencies", []),
     }
     return {k: v for k, v in listed.items() if v is not None}, plugin_fields(manifest)
 
@@ -445,7 +452,15 @@ def check_names(components, taken):
         )
 
 
-def describe(entry, log, known=None, taken=None, listed_before=(), left_out=None, state=None):
+def check_needs(needs, ids):
+    """dashAI only finds a plugin it needs in the store (never a repo the
+    manifest names), so each must have an entry."""
+    unknown = [i for i in needs if i not in ids]
+    if unknown:
+        raise Invalid(f"plugin_dependencies not in the store: {', '.join(unknown)}; add them first")
+
+
+def describe(entry, log, known=None, taken=None, listed_before=(), left_out=None, state=None, ids=frozenset()):
     """The entry as index.json lists it; None if no release passes. ``known``:
     its entry in the last index, whose unchanged releases are reused, and a
     release it left out that is older than one that passes is not reviewed
@@ -453,7 +468,8 @@ def describe(entry, log, known=None, taken=None, listed_before=(), left_out=None
     release can't use (``taken_names``); the tags in ``listed_before`` are not
     checked against them, so dashAI adding a name later doesn't drop what is
     listed. ``left_out`` gets why each release newer than the newest that
-    passes fails. ``state``: the repo and its releases as ``triage`` read them."""
+    passes fails. ``state``: the repo and its releases as ``triage`` read them.
+    ``ids``: the store's entries, the only plugins a release may need."""
     repo = entry["repo"]
     repo_data, found = state or (None, None)
     license_id = check_repo(repo, repo_data)
@@ -473,6 +489,7 @@ def describe(entry, log, known=None, taken=None, listed_before=(), left_out=None
             continue
         try:
             listed, fields = review(repo, release, entry["id"])
+            check_needs(listed["plugin_dependencies"], ids)
             if tag not in listed_before:
                 check_names(fields["components"], taken or {})
         except Invalid as error:
@@ -557,7 +574,8 @@ def check(paths):
             if entry["repo"].lower() in repos:
                 raise Invalid(f"{entry['repo']} is already in the store")
             taken = taken_names(others, entry["id"], dashai)
-            listed = describe(entry, lines.append, taken=taken)
+            ids = {p.stem for p in entries()} - removed_ids()
+            listed = describe(entry, lines.append, taken=taken, ids=ids)
             if listed is None:
                 raise Invalid("no release passes")
             latest = listed["releases"][0]
@@ -589,6 +607,7 @@ def build(full=False):
     except (urllib.error.URLError, OSError, ValueError) as error:
         print(f"triage failed, each plugin is read with REST: {error}")
         state = {}
+    ids = {p.stem for p in entries()} - {item["id"] for item in removed}
     plugins = []
     problems, fine = {}, {}  # id -> (repo, why, tag still offered); id -> tag
     for entry_path in entries():
@@ -605,6 +624,7 @@ def build(full=False):
                 {release["tag"] for release in before.get("releases", [])},
                 left_out,
                 state.get(entry["repo"].lower()),
+                ids,
             )
         except Invalid as error:
             print(f"  left out: {error}")
