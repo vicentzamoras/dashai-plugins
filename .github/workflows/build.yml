@@ -1,13 +1,14 @@
 # Builds index.json (scripts/validate.py) after a merge, every 6 hours (new
 # releases need no PR; only what changed is reviewed) and on demand ("full":
 # every release again, when the bot's rules change). It commits only when what
-# the index lists changes.
+# the index lists changes, and then signs it (index.json.sigstore.json: dashAI
+# reads the store only if this workflow, on main, signed it).
 name: Build index
 
 on:
   push:
     branches: [main]
-    paths: ["plugins/**", "removed.json", "scripts/**"]
+    paths: ["plugins/**", "removed.json", "revoked.json", "scripts/**"]
   schedule:
     - cron: "17 */6 * * *"
   workflow_dispatch:
@@ -20,6 +21,8 @@ on:
 permissions:
   contents: write
   issues: write # notify: tells an author why a release was left out
+  id-token: write # signs index.json
+  attestations: write
 
 concurrency:
   group: build-index
@@ -35,10 +38,20 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           FULL: ${{ inputs.full && '--full' || '' }}
         run: python3 scripts/validate.py build $FULL
+      - name: Changed
+        id: changed
+        run: git diff --quiet index.json || echo "index=1" >> "$GITHUB_OUTPUT"
+      - name: Sign
+        id: sign
+        if: steps.changed.outputs.index
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: index.json
       - name: Commit
+        if: steps.changed.outputs.index
         run: |
-          git add index.json
-          if git diff --cached --quiet; then exit 0; fi
+          cp "${{ steps.sign.outputs.bundle-path }}" index.json.sigstore.json
+          git add index.json index.json.sigstore.json bundles
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "Update index.json"

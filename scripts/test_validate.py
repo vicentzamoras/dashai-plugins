@@ -23,7 +23,7 @@ class Describe(unittest.TestCase):
         known = {
             "location": "https://github.com/me/kit",
             **FIELDS,
-            "releases": [{"tag": "v1", "sha256": SHA, "trust_level": "github_asset", "commit": "c" * 40}],
+            "releases": [{"tag": "v1", "sha256": SHA, "trust_level": "github_asset", "commit": "c" * 40, "artifact": {"kind": "asset"}}],
         }
         repo = {"full_name": "me/kit", "private": False, "archived": False, "license": {"spdx_id": "MIT"}}
         found = [release("v3", "b" * 64), release("v1", SHA), release("v0", "d" * 64)]

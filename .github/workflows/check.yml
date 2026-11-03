@@ -1,4 +1,5 @@
-# Checks a PR that adds or changes a plugin's entry (scripts/validate.py).
+# Checks a PR that adds or changes a plugin's entry, removed.json or
+# revoked.json (scripts/validate.py).
 name: Check
 
 on:
@@ -29,18 +30,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           changed=$(git diff --name-only HEAD^1 HEAD)
-          other=$(echo "$changed" | grep -v -E '^(plugins/[a-z0-9-]+\.json|removed\.json)$' || true)
+          other=$(echo "$changed" | grep -v -E '^(plugins/[a-z0-9-]+\.json|removed\.json|revoked\.json)$' || true)
           if [ -n "$other" ]; then
-            echo "A PR to the store only changes plugins/<id>.json (or removed.json). Also changed:"
+            echo "A PR to the store only changes plugins/<id>.json (or removed.json, revoked.json). Also changed:"
             echo "$other"
             exit 1
           fi
           entries=$(git diff --name-only --diff-filter=AMR HEAD^1 HEAD -- plugins || true)
-          if [ -z "$entries" ]; then
-            echo "No entry added or changed: nothing to check."
-            exit 0
-          fi
-          if [ "$(echo "$entries" | wc -l)" -gt 1 ]; then
+          if [ "$(echo "$entries" | grep -c .)" -gt 1 ]; then
             echo "One plugin per PR."
             exit 1
           fi

@@ -8,7 +8,8 @@
     "schema",
     "built_at",
     "plugins",
-    "removed"
+    "removed",
+    "revoked"
   ],
   "properties": {
     "schema": {
@@ -99,7 +100,8 @@
                 "sha256",
                 "commit",
                 "published_at",
-                "dependencies"
+                "dependencies",
+                "artifact"
               ],
               "properties": {
                 "tag": {
@@ -149,6 +151,60 @@
                   "type": "string",
                   "format": "date-time",
                   "description": "Solo github_attested"
+                },
+                "artifact": {
+                  "description": "Lo que dashAI descarga: el archivo de la release o el código en commit",
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "kind",
+                        "url",
+                        "size"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "const": "asset"
+                        },
+                        "url": {
+                          "type": "string",
+                          "pattern": "^https://"
+                        },
+                        "size": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 209715200
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "kind"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "const": "source"
+                        }
+                      }
+                    }
+                  ]
+                },
+                "attestation": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "bundle_url"
+                  ],
+                  "description": "Solo github_attested: dónde está su firma (bundles/ de este repo)",
+                  "properties": {
+                    "bundle_url": {
+                      "type": "string",
+                      "pattern": "^https://"
+                    }
+                  }
                 }
               }
             }
@@ -169,6 +225,9 @@
     },
     "removed": {
       "$ref": "removed.schema.json"
+    },
+    "revoked": {
+      "$ref": "revoked.schema.json"
     }
   }
 }

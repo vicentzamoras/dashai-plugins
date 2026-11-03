@@ -15,6 +15,13 @@ needs dashAI running (pip resolving the dependencies with its own, loading the
 code). dashAI checks all of it again when installing: this only decides what
 the store lists.
 
+Each release says what dashAI downloads (``artifact``: the release file's
+URL and size, or the source code at ``commit``) and, when attested, where its
+signature is (``attestation.bundle_url``, a file of ``bundles/`` here), so
+installing from the store needs no request to GitHub's API. revoked.json lists
+releases revoked by their sha256: the index carries it (dashAI blocks them where
+installed) and leaves them out of ``releases``, which an older dashAI reads.
+
 The build reuses a release already in index.json while its file (or, for
 source code, its commit) is the same: it only reviews what is new. It reads
 every repo's state and releases with GraphQL, 100 repos per query (``triage``),
@@ -33,9 +40,11 @@ import ast
 import gzip
 import hashlib
 import io
+import ipaddress
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 import tarfile
@@ -65,6 +74,10 @@ LICENSES = {
     "LGPL-3.0", "Unlicense",
 }
 ROOT = Path(".")
+# Where dashAI downloads a release's signature from: this repo, on main.
+BUNDLES = "https://raw.githubusercontent.com/{}/main/bundles/{}/{}.json"
+INDEX_REPO = os.environ.get("GITHUB_REPOSITORY", "vicentzamoras/dashai-plugins")
+SHA256 = re.compile(r"^[0-9a-f]{64}$")
 # dashAI's own components, released (production) and upcoming (develop).
 DASHAI_COMPONENTS = (
     "https://raw.githubusercontent.com/DashAISoftware/DashAI/{}/DashAI/back/initial_components.py"
@@ -96,6 +109,36 @@ def api(path):
     data = get(API + path)
     return json.loads(data) if data else None
 
+
+def load_entry(path, removed):
+    """The entry's own rules (shape, name, id); returns it."""
+    path = Path(path)
+    try:
+        entry = json.loads(path.read_text("utf-8"))
+    except ValueError as error:
+        raise Invalid(f"{path.name} is not JSON: {error}") from error
+    if not isinstance(entry, dict) or set(entry) != {"id", "repo"}:
+        raise Invalid(f'{path.name} must have exactly "id" and "repo"')
+    plugin_id, repo = entry["id"], entry["repo"]
+    if path.name != f"{plugin_id}.json":
+        raise Invalid(f'the file must be named after its id: plugins/{plugin_id}.json')
+    if not isinstance(plugin_id, str) or not ID.match(plugin_id):
+        raise Invalid(f"invalid id {plugin_id!r}: lowercase letters and digits, joined by single -")
+    if "dashai" in plugin_id:
+        raise Invalid('the id cannot contain "dashai"')
+    if plugin_id in removed:
+        raise Invalid(f"the id {plugin_id!r} belongs to a removed plugin")
+    if not isinstance(repo, str) or not REPO.match(repo):
+        raise Invalid(f'repo must be "owner/name", not {repo!r}')
+    return entry
+
+
+# What a provider must answer, here GitHub's (another one, e.g. GitLab, would
+# answer the same with its own API): ``triage`` (many repos at once),
+# ``check_repo`` (state and license), ``releases``, ``release_file``,
+# ``tag_commit``, ``attestation`` (and its bundle), ``fetch`` (the bytes dashAI
+# downloads, its sha256 and ``artifact``) and ``unchanged``. Only this section
+# talks to the provider's API; dashAI never imports from here.
 
 # What ``triage`` asks of each repo. 5 releases (a query of 100 repos costs 6
 # of the 1,000 points an hour GITHUB_TOKEN has: 10,000 plugins take 600).
@@ -156,29 +199,6 @@ def triage(repos):
     return found
 
 
-def load_entry(path, removed):
-    """The entry's own rules (shape, name, id); returns it."""
-    path = Path(path)
-    try:
-        entry = json.loads(path.read_text("utf-8"))
-    except ValueError as error:
-        raise Invalid(f"{path.name} is not JSON: {error}") from error
-    if not isinstance(entry, dict) or set(entry) != {"id", "repo"}:
-        raise Invalid(f'{path.name} must have exactly "id" and "repo"')
-    plugin_id, repo = entry["id"], entry["repo"]
-    if path.name != f"{plugin_id}.json":
-        raise Invalid(f'the file must be named after its id: plugins/{plugin_id}.json')
-    if not isinstance(plugin_id, str) or not ID.match(plugin_id):
-        raise Invalid(f"invalid id {plugin_id!r}: lowercase letters and digits, joined by single -")
-    if "dashai" in plugin_id:
-        raise Invalid('the id cannot contain "dashai"')
-    if plugin_id in removed:
-        raise Invalid(f"the id {plugin_id!r} belongs to a removed plugin")
-    if not isinstance(repo, str) or not REPO.match(repo):
-        raise Invalid(f'repo must be "owner/name", not {repo!r}')
-    return entry
-
-
 def check_repo(repo, data=None):
     """Refuses a repo the store can't list; returns its license (SPDX id).
     ``data``: its state, if ``triage`` already read it."""
@@ -186,7 +206,8 @@ def check_repo(repo, data=None):
         data = data or api(f"repos/{repo}")
     except Invalid as error:
         raise Invalid(f"{repo} does not exist or is private") from error
-    if data["full_name"].lower() != repo.lower():  # renamed or moved
+    # Exact casing: dashAI checks an attestation against the location as is.
+    if data["full_name"] != repo:  # renamed, moved or typed in other casing
         raise Invalid(f"{repo} is now {data['full_name']}: update the entry")
     if data["private"]:
         raise Invalid(f"{repo} is private")
@@ -252,18 +273,25 @@ def utc(timestamp):
 
 def attestation(file, repo, tag):
     """What a valid attestation of ``file`` records (the commit the build ran
-    on, its workflow and when it was signed), or None if it has none. `gh`
-    checks the same as dashAI: this repo's GitHub Actions, at this tag."""
+    on, its workflow and when it was signed) and its ``bundle`` (what dashAI
+    verifies again), or None if it has none. `gh` checks the same as dashAI:
+    this repo's GitHub Actions, at this tag, on a runner GitHub hosts."""
     run = subprocess.run(
         ["gh", "attestation", "verify", str(file), "--repo", repo,
-         "--source-ref", f"refs/tags/{tag}", "--format", "json"],
-        capture_output=True, text=True,
+         "--source-ref", f"refs/tags/{tag}", "--deny-self-hosted-runners",
+         "--format", "json"],
+        capture_output=True, text=True, encoding="utf-8",
     )
     if run.returncode != 0:
         return None
-    details = {"commit": None, "workflow": None, "signed_at": None}
+    try:  # without its bundle dashAI can't verify it: not attested
+        verified = json.loads(run.stdout)[0]
+        details = {"bundle": verified["attestation"]["bundle"]}
+    except (KeyError, IndexError, TypeError, ValueError):
+        return None
+    details.update(commit=None, workflow=None, signed_at=None)
     try:  # verified: a detail it can't read is only left out
-        result = json.loads(run.stdout)[0]["verificationResult"]
+        result = verified["verificationResult"]
         build = result["statement"]["predicate"]["buildDefinition"]
         details["workflow"] = build["externalParameters"]["workflow"]["path"]
         details["commit"] = next(
@@ -275,34 +303,55 @@ def attestation(file, repo, tag):
     return details
 
 
+def public_https(url):
+    """Refuses a URL dashAI must not be sent to: not https, or a host that
+    resolves into a private network (loopback, link-local, private)."""
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme != "https" or not parts.hostname:
+        raise Invalid(f"not an https URL: {url}")
+    try:
+        addresses = {info[4][0] for info in socket.getaddrinfo(parts.hostname, 443)}
+    except OSError as error:
+        raise Invalid(f"cannot resolve {parts.hostname}: {error}") from error
+    if not all(ipaddress.ip_address(address.split("%")[0]).is_global for address in addresses):
+        raise Invalid(f"{url} points into a private network")
+
+
 def fetch(repo, release, into):
     """What dashAI would download for this release: its folder, and how the
-    index lists it (sha256, trust level, commit; an attestation's workflow and
-    signing time). The sha256 is computed as dashAI does, so installing can
-    compare it."""
+    index lists it (sha256, trust level, commit, ``artifact``; an attestation's
+    workflow, signing time and ``bundle``). The sha256 is computed as dashAI
+    does, so installing can compare it."""
     tag = release["tag_name"]
     asset = release_file(release)
     if asset:
         if asset["size"] > MAX_BYTES:
             raise Invalid(f"{asset['name']} is larger than 200 MB")
-        blob = get(asset["browser_download_url"])
+        url = asset["browser_download_url"]
+        public_https(url)
+        blob = get(url)
         sha256 = hashlib.sha256(blob).hexdigest()
         if asset.get("digest") and asset["digest"] != f"sha256:{sha256}":
             raise Invalid(f"{asset['name']} does not match GitHub's digest")
         file = into / asset["name"]
         file.write_bytes(blob)
         attested = attestation(file, repo, tag)
-        listed = {"sha256": sha256, "trust_level": "github_asset"}
+        listed = {
+            "sha256": sha256,
+            "trust_level": "github_asset",
+            "artifact": {"kind": "asset", "url": url, "size": len(blob)},
+        }
         if attested:
             listed.update(trust_level="github_attested", workflow=attested["workflow"],
-                          signed_at=attested["signed_at"])
+                          signed_at=attested["signed_at"], bundle=attested["bundle"])
         listed["commit"] = (attested or {}).get("commit") or tag_commit(repo, release)
         return extract(blob, asset["name"].lower(), into / "plugin"), listed
     # No single file: the source code at the tag's commit (a tag can move).
     commit = tag_commit(repo, release)
     blob = get(f"https://codeload.github.com/{repo}/tar.gz/{commit}")
     sha256 = hashlib.sha256(gzip.decompress(blob)).hexdigest()  # the tar's, as dashAI
-    listed = {"sha256": sha256, "trust_level": "github_source", "commit": commit}
+    listed = {"sha256": sha256, "trust_level": "github_source", "commit": commit,
+              "artifact": {"kind": "source"}}
     return extract(blob, "source.tar.gz", into / "plugin"), listed
 
 
@@ -320,8 +369,8 @@ def has_readme(repo, commit):
 def unchanged(repo, release, old):
     """Whether ``old`` (this tag in the last index) still describes the
     release: the same file (GitHub's digest) or, for source code, the same
-    commit."""
-    if not old or "commit" not in old:
+    commit. One listed before releases had an ``artifact`` is reviewed again."""
+    if not old or "commit" not in old or "artifact" not in old:
         return False
     asset = release_file(release)
     if asset:
@@ -418,7 +467,8 @@ PLUGIN_FIELDS = ("name", "description", "authors", "components", "component_type
 
 
 def review(repo, release, plugin_id):
-    """(how the index lists the release, the plugin's fields from it)."""
+    """(how the index lists the release, the plugin's fields from it). An
+    attested release's bundle comes along (``bundle``), for ``save_bundles``."""
     tag = release["tag_name"]
     with tempfile.TemporaryDirectory() as tmp:
         folder, listed = fetch(repo, release, Path(tmp))
@@ -434,6 +484,8 @@ def review(repo, release, plugin_id):
         "dependencies": manifest.get("dependencies", []),
         "plugin_dependencies": manifest.get("plugin_dependencies", []),
     }
+    if "bundle" in listed:
+        listed["attestation"] = {"bundle_url": BUNDLES.format(INDEX_REPO, plugin_id, tag)}
     return {k: v for k, v in listed.items() if v is not None}, plugin_fields(manifest)
 
 
@@ -533,6 +585,35 @@ def dashai_components():
     return names
 
 
+def load_revoked():
+    """revoked.json: releases revoked by their bytes, ``{id, sha256, date}``."""
+    revoked = json.loads((ROOT / "revoked.json").read_text("utf-8"))
+    for item in revoked:
+        if not isinstance(item, dict) or set(item) != {"id", "sha256", "date"}:
+            raise Invalid(f'revoked.json: each item has exactly "id", "sha256" and "date": {item!r}')
+        if not isinstance(item["id"], str) or not ID.match(item["id"]):
+            raise Invalid(f"revoked.json: invalid id {item['id']!r}")
+        if not isinstance(item["sha256"], str) or not SHA256.match(item["sha256"]):
+            raise Invalid(f"revoked.json: invalid sha256 {item['sha256']!r}")
+        try:
+            datetime.strptime(item["date"], "%Y-%m-%d")
+        except (TypeError, ValueError) as error:
+            raise Invalid(f"revoked.json: date must be YYYY-MM-DD, not {item['date']!r}") from error
+    return revoked
+
+
+def save_bundles(plugin):
+    """Writes the bundle of each newly reviewed attested release to
+    ``bundles/<id>/<tag>.json`` (what its ``bundle_url`` names) and takes it
+    out of the release. A tag is a version (``check_manifest``): a safe name."""
+    for release in plugin["releases"]:
+        bundle = release.pop("bundle", None)
+        if bundle is not None:
+            path = ROOT / "bundles" / plugin["id"] / f"{release['tag']}.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(bundle, separators=(",", ":")) + "\n", "utf-8", newline="\n")
+
+
 def removed_ids():
     return {item["id"] for item in json.loads((ROOT / "removed.json").read_text("utf-8"))}
 
@@ -557,6 +638,11 @@ def entry_repos():
 def check(paths):
     """A PR: only entries change, each passes, owned by the PR's author."""
     author = os.environ["PR_AUTHOR"].lower()
+    try:
+        load_revoked()
+    except (Invalid, ValueError) as error:
+        print(f"❌ {error}")
+        return 1
     report, failed = [], False
     others = json.loads((ROOT / "index.json").read_text("utf-8"))["plugins"]
     dashai = dashai_components()
@@ -596,11 +682,14 @@ def build(full=False):
     """index.json from every entry. A plugin that can't be read now (GitHub
     down, rate limit) keeps what the index had. ``built_at`` is when what it
     lists last changed: a build that changes nothing leaves the file as it was
-    (no commit, and dashAI's ETag holds)."""
+    (no commit, and dashAI's ETag holds). A revoked release is left out of
+    ``releases`` (an entry left without any, out of the index)."""
     path = ROOT / "index.json"
     old = json.loads(path.read_text("utf-8")) if path.is_file() else {"plugins": []}
     kept = {p["id"]: p for p in old["plugins"]}
     removed = json.loads((ROOT / "removed.json").read_text("utf-8"))
+    revoked = load_revoked()
+    bad = {(item["id"], item["sha256"]) for item in revoked}
     dashai = dashai_components()
     try:
         state = triage(entry_repos())
@@ -646,7 +735,12 @@ def build(full=False):
             problems[entry["id"]] = (entry["repo"], left_out, offered)
         else:
             fine[entry["id"]] = offered
-    index = {"schema": 1, "built_at": old.get("built_at"), "plugins": plugins, "removed": removed}
+    for plugin in plugins:
+        save_bundles(plugin)
+        plugin["releases"] = [r for r in plugin["releases"] if (plugin["id"], r["sha256"]) not in bad]
+    plugins = [plugin for plugin in plugins if plugin["releases"]]
+    index = {"schema": 1, "built_at": old.get("built_at"), "plugins": plugins,
+             "removed": removed, "revoked": revoked}
     if index != old:
         index["built_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
     # Compact: a quarter smaller than indented, and dashAI reads it whole.

@@ -23,7 +23,12 @@ un issue de este repo que lo menciona.
 
 - `plugins/<id>.json`: una entrada por plugin (`id` y `repo`).
 - `removed.json`: plugins retirados, con el motivo.
-- `index.json`: lo genera **Build index**; no se edita a mano.
+- `revoked.json`: releases revocadas por su sha256 (`id`, `sha256`, `date`): dashAI las
+  bloquea donde estén instaladas y la tienda deja de ofrecerlas.
+- `index.json`: lo genera **Build index**; no se edita a mano. Lo firma ese workflow
+  (`index.json.sigstore.json`) y dashAI no lee un índice sin esa firma.
+- `bundles/<id>/<tag>.json`: la firma (attestation) de cada release `github_attested`, para
+  que dashAI la verifique sin pedírsela a la API de GitHub.
 - `schema/`: el formato de cada archivo (JSON Schema).
 - `scripts/validate.py` y `.github/workflows/`: el bot (su test: `python -m unittest discover scripts`).
 
