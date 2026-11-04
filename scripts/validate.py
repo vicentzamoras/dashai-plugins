@@ -466,6 +466,12 @@ def plugin_fields(manifest):
 PLUGIN_FIELDS = ("name", "description", "authors", "components", "component_types", "project_urls")
 
 
+def compact(fields):
+    """``fields`` without the values dashAI reads as missing ("", [], {},
+    None): the index it parses is the same, in fewer bytes."""
+    return {key: value for key, value in fields.items() if value not in ("", [], {}, None)}
+
+
 def review(repo, release, plugin_id):
     """(how the index lists the release, the plugin's fields from it). An
     attested release's bundle comes along (``bundle``), for ``save_bundles``."""
@@ -486,7 +492,7 @@ def review(repo, release, plugin_id):
     }
     if "bundle" in listed:
         listed["attestation"] = {"bundle_url": BUNDLES.format(INDEX_REPO, plugin_id, tag)}
-    return {k: v for k, v in listed.items() if v is not None}, plugin_fields(manifest)
+    return listed, plugin_fields(manifest)
 
 
 def taken_names(plugins, plugin_id, dashai):
@@ -541,7 +547,7 @@ def describe(entry, log, known=None, taken=None, listed_before=(), left_out=None
             continue
         try:
             listed, fields = review(repo, release, entry["id"])
-            check_needs(listed["plugin_dependencies"], ids)
+            check_needs(listed["plugin_dependencies"], ids)  # review writes it
             if tag not in listed_before:
                 check_names(fields["components"], taken or {})
         except Invalid as error:
@@ -554,15 +560,16 @@ def describe(entry, log, known=None, taken=None, listed_before=(), left_out=None
     if not passed:
         return None
     # The newest release's fields; reused, it was the newest one before too.
-    fields = passed[0][1] or {key: known[key] for key in PLUGIN_FIELDS}
-    return {
+    fields = passed[0][1] or {key: known[key] for key in PLUGIN_FIELDS if key in known}
+    return compact({
         "id": entry["id"],
         "source": "git",
         "location": location,
         **fields,
+        "authors": [compact(author) for author in fields["authors"]],
         "license": license_id,
-        "releases": [listed for listed, _ in passed],
-    }
+        "releases": [compact(listed) for listed, _ in passed],
+    })
 
 
 def dashai_components():

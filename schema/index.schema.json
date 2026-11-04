@@ -29,12 +29,10 @@
           "source",
           "location",
           "name",
-          "description",
           "authors",
           "components",
           "component_types",
           "releases",
-          "project_urls",
           "license"
         ],
         "properties": {
@@ -100,7 +98,6 @@
                 "sha256",
                 "commit",
                 "published_at",
-                "dependencies",
                 "artifact"
               ],
               "properties": {

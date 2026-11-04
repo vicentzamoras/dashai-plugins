@@ -39,6 +39,23 @@ class Describe(unittest.TestCase):
         self.assertEqual(reviewed, ["v3"])  # v1 is the same file; v0 was left out before and is older
         self.assertEqual([r["tag"] for r in listed["releases"]], ["v3", "v1"])
 
+    def test_lists_no_value_dashai_reads_as_missing(self):
+        listed = {"tag": "v1", "sha256": SHA, "trust_level": "github_asset", "commit": "c" * 40, "artifact": {"kind": "asset"}}
+        known = {  # as the bot wrote it before: every field, empty or not
+            "location": "https://github.com/me/kit", **FIELDS, "authors": [{"name": "me", "email": "", "url": ""}],
+            "releases": [{**listed, "dependencies": [], "plugin_dependencies": []}],
+        }
+        repo = {"full_name": "me/kit", "private": False, "archived": False, "license": {"spdx_id": "MIT"}}
+        state = (repo, [release("v1", SHA)])
+
+        entry = validate.describe({"id": "kit", "repo": "me/kit"}, lambda _: None, known, state=state)
+        self.assertEqual(entry, {
+            "id": "kit", "source": "git", "location": "https://github.com/me/kit",
+            "name": "Kit", "authors": [{"name": "me"}], "license": "MIT", "releases": [listed],
+        })
+        # Written that way, the next build reuses it as it is.
+        self.assertEqual(validate.describe({"id": "kit", "repo": "me/kit"}, lambda _: None, entry, state=state), entry)
+
     def test_leaves_out_a_release_that_needs_a_plugin_not_in_the_store(self):
         repo = {"full_name": "me/kit", "private": False, "archived": False, "license": {"spdx_id": "MIT"}}
         found = [release("v2", "b" * 64), release("v1", SHA)]
