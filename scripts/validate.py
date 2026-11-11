@@ -8,7 +8,7 @@ Checked here: the entry, the repo (public, not archived, license), its
 releases (one .zip/.tar.gz or the tag's source code, at most 200 MB, the
 attestation with `gh attestation verify`) and the manifest (fields, id, the
 version equals the tag, component types, each class exists, read with ast;
-the plugins it needs have an entry here).
+the plugins it needs, each with an optional version range, have an entry here).
 A PR's component names must not be another store plugin's nor dashAI's own
 (its `get_initial_components`, read with ast from GitHub). Not checked: what
 needs dashAI running (pip resolving the dependencies with its own, loading the
@@ -33,7 +33,7 @@ between builds. When a new release (or the whole
 plugin) is left out, the build tells its author in an issue of this repo
 (``notify``); outside GitHub Actions it only prints what it would do.
 
-Standard library and the `gh` CLI only; GITHUB_TOKEN raises GitHub's limit.
+Standard library, `packaging` and the `gh` CLI only; GITHUB_TOKEN raises GitHub's limit.
 """
 
 import ast
@@ -55,6 +55,8 @@ import urllib.request
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
+
+from packaging.requirements import InvalidRequirement, Requirement
 
 API = "https://api.github.com/"
 TOKEN = os.environ.get("GITHUB_TOKEN")
@@ -440,8 +442,13 @@ def check_manifest(folder, plugin_id, tag):
     if not isinstance(dependencies, list) or not all(isinstance(d, str) for d in dependencies):
         raise Invalid("dependencies must be a list of pip requirements")
     needs = manifest.get("plugin_dependencies", [])
-    if not isinstance(needs, list) or not all(isinstance(i, str) and ID.match(i) for i in needs):
-        raise Invalid("plugin_dependencies must be a list of plugin ids")
+    try:
+        needs = [Requirement(i) for i in needs] if isinstance(needs, list) else None
+    except (InvalidRequirement, TypeError):
+        needs = None
+    if needs is None or not all(ID.match(r.name) and not (r.extras or r.url or r.marker) for r in needs):
+        raise Invalid("plugin_dependencies must be a list of plugin ids, each with an optional version range")
+    needs = [r.name for r in needs]
     if len(set(needs)) != len(needs) or plugin_id in needs:
         raise Invalid("plugin_dependencies can't repeat an id nor name the plugin itself")
     return manifest
@@ -513,7 +520,7 @@ def check_names(components, taken):
 def check_needs(needs, ids):
     """dashAI only finds a plugin it needs in the store (never a repo the
     manifest names), so each must have an entry."""
-    unknown = [i for i in needs if i not in ids]
+    unknown = [i for i in (Requirement(n).name for n in needs) if i not in ids]
     if unknown:
         raise Invalid(f"plugin_dependencies not in the store: {', '.join(unknown)}; add them first")
 

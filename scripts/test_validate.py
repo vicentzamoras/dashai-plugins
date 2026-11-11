@@ -59,7 +59,7 @@ class Describe(unittest.TestCase):
     def test_leaves_out_a_release_that_needs_a_plugin_not_in_the_store(self):
         repo = {"full_name": "me/kit", "private": False, "archived": False, "license": {"spdx_id": "MIT"}}
         found = [release("v2", "b" * 64), release("v1", SHA)]
-        needs = {"v2": ["text-toolkit"], "v1": ["nlp-core"]}
+        needs = {"v2": ["text-toolkit>=1.0"], "v1": ["nlp-core~=0.1"]}
 
         def review(_repo, rel, _id):
             tag = rel["tag_name"]
@@ -85,7 +85,11 @@ class Manifest(unittest.TestCase):
                 "min_app_version": "0.1.0", "authors": [{"name": "me"}],
                 "components": [{"class": "kit:Kit", "type": "Metric"}],
             }
-            for needs, ok in ((["nlp-core"], True), (["NLP"], False), (["a", "a"], False), (["kit"], False)):
+            for needs, ok in (
+                (["nlp-core"], True), (["nlp-core>=0.0.2", "a~=0.1.0"], True), (["NLP"], False),
+                (["a", "a>=1"], False), (["kit"], False), (["a[x]>=1"], False),
+                (["a>=1; python_version>'3'"], False), (["a>>1"], False),
+            ):
                 (folder / "manifest.json").write_text(json.dumps({**manifest, "plugin_dependencies": needs}))
                 if ok:
                     validate.check_manifest(folder, "kit", "v1.0.0")
