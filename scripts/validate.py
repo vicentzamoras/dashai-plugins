@@ -9,8 +9,8 @@ releases (one .zip/.tar.gz or the tag's source code, at most 200 MB, the
 attestation with `gh attestation verify`) and the manifest (fields, id, the
 version equals the tag, component types, each class exists, read with ast;
 the plugins it needs, each with an optional version range, have an entry here).
-A PR's component names must not be another store plugin's nor dashAI's own
-(its `get_initial_components`, read with ast from GitHub). Not checked: what
+Component names are not compared with other plugins' nor dashAI's: dashAI
+registers a plugin's component as `<plugin-id>:Class`. Not checked: what
 needs dashAI running (pip resolving the dependencies with its own, loading the
 code). dashAI checks all of it again when installing: this only decides what
 the store lists.
@@ -70,7 +70,7 @@ TYPES = {
     "Model", "Converter", "Metric", "Task", "DataLoader", "Explorer",
     "GlobalExplainer", "LocalExplainer", "GenerativeModel",
     "GenerativeTask",
-}  # dashAI's ALLOWED_COMPONENT_TYPES (plugins/validator.py)
+}  # dashAI's ALLOWED_COMPONENT_TYPES (plugins/manifest/validator.py)
 LICENSES = {
     "MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "GPL-3.0",
     "LGPL-3.0", "Unlicense",
@@ -80,11 +80,6 @@ ROOT = Path(".")
 BUNDLES = "https://raw.githubusercontent.com/{}/main/bundles/{}/{}.json"
 INDEX_REPO = os.environ.get("GITHUB_REPOSITORY", "vicentzamoras/dashai-plugins")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
-# dashAI's own components, released (production) and upcoming (develop).
-DASHAI_COMPONENTS = (
-    "https://raw.githubusercontent.com/DashAISoftware/DashAI/{}/DashAI/back/initial_components.py"
-)
-DASHAI_BRANCHES = ("production", "develop")
 
 
 class Invalid(Exception):
@@ -502,21 +497,6 @@ def review(repo, release, plugin_id):
     return listed, plugin_fields(manifest)
 
 
-def taken_names(plugins, plugin_id, dashai):
-    """Component name -> who has it: dashAI, or another plugin of the store."""
-    taken = {name: p["id"] for p in plugins if p["id"] != plugin_id for name in p["components"]}
-    return {**taken, **{name: "dashAI" for name in dashai}}
-
-
-def check_names(components, taken):
-    clash = [name for name in components if name in taken]
-    if clash:
-        raise Invalid(
-            f"component names already used: {', '.join(f'{n} ({taken[n]})' for n in clash)}; "
-            "rename these classes with a prefix of your own and publish a new release"
-        )
-
-
 def check_needs(needs, ids):
     """dashAI only finds a plugin it needs in the store (never a repo the
     manifest names), so each must have an entry."""
@@ -525,14 +505,11 @@ def check_needs(needs, ids):
         raise Invalid(f"plugin_dependencies not in the store: {', '.join(unknown)}; add them first")
 
 
-def describe(entry, log, known=None, taken=None, listed_before=(), left_out=None, state=None, ids=frozenset()):
+def describe(entry, log, known=None, left_out=None, state=None, ids=frozenset()):
     """The entry as index.json lists it; None if no release passes. ``known``:
     its entry in the last index, whose unchanged releases are reused, and a
     release it left out that is older than one that passes is not reviewed
-    again. ``log`` gets one line per release. ``taken``: component names a new
-    release can't use (``taken_names``); the tags in ``listed_before`` are not
-    checked against them, so dashAI adding a name later doesn't drop what is
-    listed. ``left_out`` gets why each release newer than the newest that
+    again. ``log`` gets one line per release. ``left_out`` gets why each release newer than the newest that
     passes fails. ``state``: the repo and its releases as ``triage`` read them.
     ``ids``: the store's entries, the only plugins a release may need."""
     repo = entry["repo"]
@@ -555,8 +532,6 @@ def describe(entry, log, known=None, taken=None, listed_before=(), left_out=None
         try:
             listed, fields = review(repo, release, entry["id"])
             check_needs(listed["plugin_dependencies"], ids)  # review writes it
-            if tag not in listed_before:
-                check_names(fields["components"], taken or {})
         except Invalid as error:
             log(f"  {tag}: {error}")
             if left_out is not None and not passed:
@@ -577,26 +552,6 @@ def describe(entry, log, known=None, taken=None, listed_before=(), left_out=None
         "license": license_id,
         "releases": [compact(listed) for listed, _ in passed],
     })
-
-
-def dashai_components():
-    """The class names dashAI registers itself: the ones its
-    ``get_initial_components`` lists. A plugin can't take them."""
-    names = set()
-    for branch in DASHAI_BRANCHES:
-        tree = ast.parse(get(DASHAI_COMPONENTS.format(branch)))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef) and node.name == "get_initial_components":
-                names |= {
-                    item.id
-                    for found in ast.walk(node)
-                    if isinstance(found, ast.List)
-                    for item in found.elts
-                    if isinstance(item, ast.Name)
-                }
-    if not names:
-        raise Invalid("could not read dashAI's own components")
-    return names
 
 
 def load_revoked():
@@ -658,8 +613,6 @@ def check(paths):
         print(f"❌ {error}")
         return 1
     report, failed = [], False
-    others = json.loads((ROOT / "index.json").read_text("utf-8"))["plugins"]
-    dashai = dashai_components()
     for path in paths:
         lines = []
         try:
@@ -673,9 +626,8 @@ def check(paths):
             repos = [json.loads(p.read_text("utf-8"))["repo"].lower() for p in entries() if p.name != Path(path).name]
             if entry["repo"].lower() in repos:
                 raise Invalid(f"{entry['repo']} is already in the store")
-            taken = taken_names(others, entry["id"], dashai)
             ids = {p.stem for p in entries()} - removed_ids()
-            listed = describe(entry, lines.append, taken=taken, ids=ids)
+            listed = describe(entry, lines.append, ids=ids)
             if listed is None:
                 raise Invalid("no release passes")
             latest = listed["releases"][0]
@@ -704,7 +656,6 @@ def build(full=False):
     removed = json.loads((ROOT / "removed.json").read_text("utf-8"))
     revoked = load_revoked()
     bad = {(item["id"], item["sha256"]) for item in revoked}
-    dashai = dashai_components()
     try:
         state = triage(entry_repos())
     except (urllib.error.URLError, OSError, ValueError) as error:
@@ -723,8 +674,6 @@ def build(full=False):
                 entry,
                 print,
                 None if full else before or None,
-                taken_names(old["plugins"], entry["id"], dashai),
-                {release["tag"] for release in before.get("releases", [])},
                 left_out,
                 state.get(entry["repo"].lower()),
                 ids,

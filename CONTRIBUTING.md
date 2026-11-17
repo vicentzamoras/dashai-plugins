@@ -10,9 +10,9 @@
    GPLv3, LGPLv3, Unlicense) y un `README.md` en la raíz, con ese nombre exacto, en el commit
    de cada release: dashAI lo muestra en la tienda desde ahí.
 4. El `id` no contiene `dashai`.
-5. Los nombres de clase de tus componentes no son los de un componente de dashAI ni los de otro
-   plugin de la tienda: dashAI identifica cada componente por el nombre de su clase, y dos no
-   pueden llamarse igual. Usa un prefijo propio (por ejemplo `KitAccuracy`, no `Accuracy`).
+5. Dos componentes de tu plugin no tienen el mismo nombre de clase. Pueden llamarse como uno de
+   dashAI o de otro plugin: dashAI registra cada uno como `<id>:Clase` (por ejemplo
+   `mi-plugin:Accuracy`).
 6. Lo probaste instalándolo en dashAI desde la URL de tu repositorio.
 
 ## El PR
@@ -32,26 +32,17 @@ en `index.json`. Las versiones nuevas no necesitan otro PR: el bot las recoge en
 
 ## Si una release nueva no aparece
 
-**Build index** revisa cada release nueva con las mismas reglas del PR, también los nombres de
-los componentes. Una release que no pasa queda fuera del índice; las anteriores siguen
-publicadas y dashAI sigue ofreciendo la última que pasó. El bot abre un issue en este repo que
-te menciona (uno por plugin; comenta solo si el motivo cambia y se cierra solo cuando una release
-nueva pasa). El motivo va una línea por release, por ejemplo:
+**Build index** revisa cada release nueva con las mismas reglas del PR. Una release que no pasa
+queda fuera del índice; las anteriores siguen publicadas y dashAI sigue ofreciendo la última que
+pasó. El bot abre un issue en este repo que te menciona (uno por plugin; comenta solo si el
+motivo cambia y se cierra solo cuando una release nueva pasa). El motivo va una línea por release, por ejemplo:
 
 ```text
-v1.2.0: component names already used: Accuracy (dashAI); rename these classes with a prefix of your own and publish a new release
+v1.2.0: version 1.1.0 does not match the tag v1.2.0
 ```
 
-Si es un choque de nombres:
-
-1. Renombra la clase con un prefijo propio (`Accuracy` → `KitAccuracy`) y actualiza su entrada
-   en `components` del manifiesto (`"class": "modulo:KitAccuracy"`).
-2. Publica una release nueva con una versión mayor. No reemplaces el archivo de la release que
-   chocó: un tag publicado no debería cambiar.
-
-Las ejecuciones que tus usuarios guardaron con un componente renombrado dejan de poder
-ejecutarse: dashAI las encuentra por el nombre de la clase. Si el componente ya existía en
-versiones anteriores, avísalo en las notas de la release.
+Corrige el motivo y publica una release nueva con una versión mayor. No reemplaces el archivo
+de la release que falló: un tag publicado no debería cambiar.
 
 ## Retirar tu plugin
 

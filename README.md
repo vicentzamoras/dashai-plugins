@@ -12,10 +12,9 @@ cambió por última vez. El archivo va compacto (sin sangría). Cada PR pasa por
 workflow **Check**. Los dos revisan lo que se puede sin dashAI: la entrada, el repo (público,
 no archivado, licencia), las releases (archivo, tamaño, atestación, `README.md` en la raíz del
 commit) y el manifiesto (campos,
-`id`, versión igual al tag, tipos, que cada clase exista). Los dos revisan además que los
-nombres de los componentes de una release nueva no sean los de otro plugin de la tienda ni los
-de dashAI (lee su `get_initial_components` de las ramas `production` y `develop`); una release
-ya publicada no se vuelve a revisar contra nombres que dashAI agregue después. Lo que necesita dashAI
+`id`, versión igual al tag, tipos, que cada clase exista y no se repita en el plugin). Los
+nombres no se comparan con los de dashAI ni con los de otros plugins: dashAI registra cada
+componente de un plugin como `<id>:Clase`. Lo que necesita dashAI
 corriendo (dependencias, cargar el código) lo vuelve a revisar dashAI al instalar.
 
 Si una release nueva (o el plugin entero) queda fuera, **Build index** se lo avisa a su autor en
